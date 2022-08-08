@@ -17,22 +17,13 @@ import (
 // var config *viper.Viper
 
 var configYaml = []byte(`
-file-watcher:
+file_watcher:
   enabled: true
+  polling_interval: 1s
   watchlist:
     - mountpath: mount-test.txt
       originalpath: original-test.txt
 `)
-
-type watchList struct {
-	MountPath    string
-	OriginalPath string
-}
-
-type redresserConfig struct {
-	Enabled   bool
-	WatchList []watchList `json:"watchlist"`
-}
 
 func readConfig() *redresserConfig {
 	config := viper.New()
@@ -42,23 +33,18 @@ func readConfig() *redresserConfig {
 		panic(err)
 	}
 
-	config = config.Sub("file-watcher")
+	config = config.Sub("file_watcher")
 	rConfig := new(redresserConfig)
 	err = config.Unmarshal(rConfig)
 	if err != nil {
 		panic(err)
 	}
+	rConfig.PollingInterval = config.GetDuration("polling_interval")
 
 	return rConfig
 }
 
 var redresserStore map[string]redresser
-
-type redresser struct {
-	mountPath    string
-	originalPath string
-	checksum     string
-}
 
 func init() {
 	log.Println("gobbler.init()")
@@ -143,20 +129,24 @@ func consumeFileEvents(ctx context.Context, feeder chan Event) {
 				return
 			}
 
-			f := event.Name
-			checksum, err := calcChecksum(f)
-			if err != nil {
-				log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
-				continue
-			}
+			go func(f string) {
+				checksum, err := calcChecksum(f)
+				if err != nil {
+					log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
+					return
+				}
 
-			r := redresserStore[f]
-			if r.checksum != checksum {
-				log.Println("Correcting file", r.mountPath)
-				copy(r.originalPath, r.mountPath)
-			} else {
-				log.Println("Ignoring event as file is untampered", r.mountPath)
-			}
+				r := redresserStore[f]
+				if r.checksum != checksum {
+					log.Println("Correcting file", r.mountPath)
+					err = copy(r.originalPath, r.mountPath)
+					if err != nil {
+						log.Println("failed to repair(copy) file, err:", err)
+					}
+				} else {
+					log.Println("Ignoring event as file is untampered", r.mountPath)
+				}
+			}(event.Name)
 
 		case <-ctx.Done():
 			log.Println("Stopping to consume file events")

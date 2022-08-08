@@ -97,12 +97,37 @@ func fileEventWatcher(ctx context.Context, files []string, feeder chan Event) er
 		}
 	}
 
-	<-ctx.Done()
-
 	return nil
 }
 
 func filePoller(ctx context.Context, files []string, feeder chan Event) error {
+	log.Println("Starting file poller")
+
+	rConfig := readConfig()
+	log.Println("Polling interval is", rConfig.PollingInterval)
+	go func() {
+		for _ = range time.NewTicker(rConfig.PollingInterval).C {
+			select {
+			case <-ctx.Done():
+				log.Println("Closing file poller")
+				return
+			default:
+				for _, f := range files {
+					checksum, err := calcChecksum(f)
+					if err != nil {
+						log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
+						continue
+					}
+					r := redresserStore[f]
+					if r.checksum != checksum {
+						log.Printf("modified file '%s' at '%s'\n\n", f, time.Now().String())
+						feeder <- frameEvent(f, "modified")
+					}
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 
@@ -118,4 +143,5 @@ func filesWatcher(ctx context.Context, files []string, feeder chan Event) {
 		panic(err)
 	}
 
+	<-ctx.Done()
 }
