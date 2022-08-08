@@ -122,6 +122,7 @@ func copy(src, dst string) error {
 func consumeFileEvents(ctx context.Context, feeder chan Event) {
 	log.Println("Consuming file events")
 
+	throttler := make(chan bool, 10)
 	for {
 		select {
 		case event, ok := <-feeder:
@@ -129,7 +130,9 @@ func consumeFileEvents(ctx context.Context, feeder chan Event) {
 				return
 			}
 
+			throttler <- true
 			go func(f string) {
+				defer func() { <-throttler }()
 				checksum, err := calcChecksum(f)
 				if err != nil {
 					log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())

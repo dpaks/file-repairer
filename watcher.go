@@ -59,14 +59,14 @@ func fileEventWatcher(ctx context.Context, files []string, feeder chan Event) er
 		return errors.Wrap(err, "failed to start file event watcher")
 	}
 
-	defer func() {
-		_ = watcher.Close()
-		log.Println("Closing file watcher")
-	}()
-
 	log.Println("Starting file watcher")
 
 	go func() {
+		defer func() {
+			_ = watcher.Close()
+			log.Println("Closing file watcher")
+		}()
+
 		for {
 			select {
 			case event, ok := <-watcher.Events:
@@ -75,7 +75,7 @@ func fileEventWatcher(ctx context.Context, files []string, feeder chan Event) er
 				}
 
 				if event.Op&(fsnotify.Write|fsnotify.Remove) > 0 {
-					log.Printf("modified file '%s' at '%s'\n\n", event.Name, time.Now().String())
+					log.Printf("fileEventWatcher: modified file '%s' at '%s'\n\n", event.Name, time.Now().String())
 					feeder <- frameEvent(event.Name, event.Op.String())
 				}
 			case err, ok := <-watcher.Errors:
@@ -120,7 +120,7 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 					}
 					r := redresserStore[f]
 					if r.checksum != checksum {
-						log.Printf("modified file '%s' at '%s'\n\n", f, time.Now().String())
+						log.Printf("filePoller: modified file '%s' at '%s'\n\n", f, time.Now().String())
 						feeder <- frameEvent(f, "modified")
 					}
 				}
