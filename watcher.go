@@ -14,13 +14,19 @@ import (
 )
 
 func main() {
+	rConfig := readConfig()
+	if rConfig.Enabled == false {
+		log.Println("File watcher is disabled")
+		return
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
-	feeder := make(chan Event, len(files))
+	feeder := make(chan Event, len(rConfig.WatchList))
 	defer close(feeder)
 
-	go consumerFileEvents(ctx, feeder)
-	go filesWatcher(ctx, []string{"test.txt"}, feeder)
+	go consumeFileEvents(ctx, feeder)
+	go filesWatcher(ctx, prepareFileList(rConfig.WatchList), feeder)
 
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -28,7 +34,16 @@ func main() {
 	log.Println("canceling")
 	cancel()
 	log.Println("bye")
-	time.Sleep(5 * time.Second)
+	time.Sleep(time.Second)
+}
+
+func prepareFileList(wl []watchList) []string {
+	fl := make([]string, 0)
+	for _, wlItem := range wl {
+		fl = append(fl, wlItem.MountPath)
+	}
+
+	return fl
 }
 
 func frameEvent(fileName, op string) Event {
@@ -92,6 +107,10 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 }
 
 func filesWatcher(ctx context.Context, files []string, feeder chan Event) {
+	if len(files) == 0 {
+		log.Println("No files to watch")
+		return
+	}
 	if err := fileEventWatcher(ctx, files, feeder); err != nil {
 		panic(err)
 	}

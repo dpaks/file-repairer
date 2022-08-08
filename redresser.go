@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"encoding/hex"
@@ -10,7 +11,46 @@ import (
 	"os"
 
 	"github.com/pkg/errors"
+	"github.com/spf13/viper"
 )
+
+// var config *viper.Viper
+
+var configYaml = []byte(`
+file-watcher:
+  enabled: true
+  watchlist:
+    - mountpath: mount-test.txt
+      originalpath: original-test.txt
+`)
+
+type watchList struct {
+	MountPath    string
+	OriginalPath string
+}
+
+type redresserConfig struct {
+	Enabled   bool
+	WatchList []watchList `json:"watchlist"`
+}
+
+func readConfig() *redresserConfig {
+	config := viper.New()
+	config.SetConfigType("yaml")
+	err := config.ReadConfig(bytes.NewBuffer(configYaml))
+	if err != nil {
+		panic(err)
+	}
+
+	config = config.Sub("file-watcher")
+	rConfig := new(redresserConfig)
+	err = config.Unmarshal(rConfig)
+	if err != nil {
+		panic(err)
+	}
+
+	return rConfig
+}
 
 var redresserStore map[string]redresser
 
@@ -20,19 +60,20 @@ type redresser struct {
 	checksum     string
 }
 
-var files = map[string]string{
-	"test.txt": "test.txt",
-}
-
 func init() {
+	log.Println("gobbler.init()")
+	rConfig := readConfig()
+
 	redresserStore = make(map[string]redresser)
-	for mountPath, originalPath := range files {
+	for _, watchListItem := range rConfig.WatchList {
+		mountPath, originalPath := watchListItem.MountPath, watchListItem.OriginalPath
 		r := redresser{
 			mountPath:    mountPath,
 			originalPath: originalPath,
 			checksum:     calcChecksumPanic(originalPath),
 		}
 		redresserStore[mountPath] = r
+		log.Printf("Calculated checksum for %s as %s\n", r.originalPath, r.checksum)
 	}
 }
 
@@ -92,7 +133,7 @@ func copy(src, dst string) error {
 	return out.Close()
 }
 
-func consumerFileEvents(ctx context.Context, feeder chan Event) {
+func consumeFileEvents(ctx context.Context, feeder chan Event) {
 	log.Println("Consuming file events")
 
 	for {
@@ -111,10 +152,10 @@ func consumerFileEvents(ctx context.Context, feeder chan Event) {
 
 			r := redresserStore[f]
 			if r.checksum != checksum {
-				log.Println("Correcting file", r.originalPath)
+				log.Println("Correcting file", r.mountPath)
 				copy(r.originalPath, r.mountPath)
 			} else {
-				log.Println("Ignoring event as file is untampered", r.originalPath)
+				log.Println("Ignoring event as file is untampered", r.mountPath)
 			}
 
 		case <-ctx.Done():
