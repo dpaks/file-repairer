@@ -14,15 +14,15 @@ import (
 	"github.com/spf13/viper"
 )
 
-// var config *viper.Viper
+const maxConsumers = 10
 
 var configYaml = []byte(`
 file_watcher:
   enabled: true
   polling_interval: 1s
   watchlist:
-    - mountpath: mount-test.txt
-      originalpath: original-test.txt
+    - mountpath: /Users/dsanthosh/Projects/exps/file-watcher/mount-test.txt
+      originalpath: /Users/dsanthosh/Projects/exps/file-watcher/original-test.txt
 `)
 
 func readConfig() *redresserConfig {
@@ -32,7 +32,6 @@ func readConfig() *redresserConfig {
 	if err != nil {
 		panic(err)
 	}
-
 	config = config.Sub("file_watcher")
 	rConfig := new(redresserConfig)
 	err = config.Unmarshal(rConfig)
@@ -122,7 +121,7 @@ func copy(src, dst string) error {
 func consumeFileEvents(ctx context.Context, feeder chan Event) {
 	log.Println("Consuming file events")
 
-	throttler := make(chan bool, 10)
+	throttler := make(chan bool, maxConsumers)
 	for {
 		select {
 		case event, ok := <-feeder:
@@ -136,7 +135,6 @@ func consumeFileEvents(ctx context.Context, feeder chan Event) {
 				checksum, err := calcChecksum(f)
 				if err != nil {
 					log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
-					return
 				}
 
 				r := redresserStore[f]

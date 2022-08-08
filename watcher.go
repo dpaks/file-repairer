@@ -116,7 +116,6 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 					checksum, err := calcChecksum(f)
 					if err != nil {
 						log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
-						continue
 					}
 					r := redresserStore[f]
 					if r.checksum != checksum {
