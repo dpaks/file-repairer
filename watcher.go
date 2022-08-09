@@ -23,13 +23,18 @@ func main() {
 		log.Println("File watcher is disabled")
 		return
 	}
+	if len(rConfig.WatchList) == 0 {
+		log.Println("Watch list is empty, returning")
+		return
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// defer cancel()
 	feeder := make(chan Event, len(rConfig.WatchList))
 	defer close(feeder)
-
 	errChan := make(chan error)
+	defer close(errChan)
+
 	go consumeFileEvents(ctx, feeder, errChan)
 	go filesWatcher(ctx, prepareFileList(rConfig.WatchList), feeder, errChan)
 
@@ -122,7 +127,10 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 
 	log.Println("Polling interval is", rConfig.PollingInterval)
 	go func() {
-		for _ = range time.NewTicker(rConfig.PollingInterval).C {
+		ticker := time.NewTicker(rConfig.PollingInterval)
+		defer ticker.Stop()
+
+		for _ = range ticker.C {
 			select {
 			case <-ctx.Done():
 				log.Println("Closing file poller")

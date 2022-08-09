@@ -69,7 +69,7 @@ func init() {
 func calcChecksum(filePath string) (string, error) {
 	checksum, err := md5sum(filePath)
 	if err != nil {
-		return "", fmt.Errorf("failed to calculate checksum for %s during init()", filePath)
+		return "", fmt.Errorf("failed to calculate checksum for %s", filePath)
 	}
 
 	return checksum, nil
