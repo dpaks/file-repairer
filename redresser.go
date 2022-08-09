@@ -25,29 +25,33 @@ file_watcher:
       originalpath: /Users/dsanthosh/Projects/exps/file-watcher/original-test.txt
 `)
 
-func readConfig() *redresserConfig {
+func readConfig() (*redresserConfig, error) {
 	config := viper.New()
 	config.SetConfigType("yaml")
 	err := config.ReadConfig(bytes.NewBuffer(configYaml))
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	config = config.Sub("file_watcher")
 	rConfig := new(redresserConfig)
 	err = config.Unmarshal(rConfig)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	rConfig.PollingInterval = config.GetDuration("polling_interval")
 
-	return rConfig
+	return rConfig, nil
 }
 
 var redresserStore map[string]redresser
 
 func init() {
 	log.Println("gobbler.init()")
-	rConfig := readConfig()
+	rConfig, err := readConfig()
+	if err != nil {
+		log.Println("error loading file watcher config, err:", err)
+		return
+	}
 
 	redresserStore = make(map[string]redresser)
 	for _, watchListItem := range rConfig.WatchList {
@@ -118,7 +122,7 @@ func copy(src, dst string) error {
 	return out.Close()
 }
 
-func consumeFileEvents(ctx context.Context, feeder chan Event) {
+func consumeFileEvents(ctx context.Context, feeder chan Event, _ chan error) {
 	log.Println("Consuming file events")
 
 	throttler := make(chan bool, maxConsumers)
@@ -137,7 +141,11 @@ func consumeFileEvents(ctx context.Context, feeder chan Event) {
 					log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
 				}
 
-				r := redresserStore[f]
+				r, ok := redresserStore[f]
+				if !ok {
+					log.Printf("Mount file %s not found in store\n", f)
+					return
+				}
 				if r.checksum != checksum {
 					log.Println("Correcting file", r.mountPath)
 					err = copy(r.originalPath, r.mountPath)

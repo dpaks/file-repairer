@@ -14,7 +14,11 @@ import (
 )
 
 func main() {
-	rConfig := readConfig()
+	rConfig, err := readConfig()
+	if err != nil {
+		log.Println("error loading file watcher config, err:", err)
+		return
+	}
 	if rConfig.Enabled == false {
 		log.Println("File watcher is disabled")
 		return
@@ -25,15 +29,22 @@ func main() {
 	feeder := make(chan Event, len(rConfig.WatchList))
 	defer close(feeder)
 
-	go consumeFileEvents(ctx, feeder)
-	go filesWatcher(ctx, prepareFileList(rConfig.WatchList), feeder)
+	errChan := make(chan error)
+	go consumeFileEvents(ctx, feeder, errChan)
+	go filesWatcher(ctx, prepareFileList(rConfig.WatchList), feeder, errChan)
 
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	<-c
-	log.Println("canceling")
-	cancel()
-	log.Println("bye")
+
+	select {
+	case err = <-errChan:
+		log.Println("error starting file watcher, err:", err)
+	case <-c:
+		log.Println("canceling")
+		cancel()
+		log.Println("bye")
+	}
+
 	time.Sleep(time.Second)
 }
 
@@ -103,7 +114,12 @@ func fileEventWatcher(ctx context.Context, files []string, feeder chan Event) er
 func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 	log.Println("Starting file poller")
 
-	rConfig := readConfig()
+	rConfig, err := readConfig()
+	if err != nil {
+		log.Println("error loading file watcher config, err:", err)
+		return err
+	}
+
 	log.Println("Polling interval is", rConfig.PollingInterval)
 	go func() {
 		for _ = range time.NewTicker(rConfig.PollingInterval).C {
@@ -117,7 +133,11 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 					if err != nil {
 						log.Printf("error calculating checksum of file %s, err: %s", f, err.Error())
 					}
-					r := redresserStore[f]
+					r, ok := redresserStore[f]
+					if !ok {
+						log.Printf("Mount file %s not found in store\n", f)
+						continue
+					}
 					if r.checksum != checksum {
 						log.Printf("filePoller: modified file '%s' at '%s'\n\n", f, time.Now().String())
 						feeder <- frameEvent(f, "modified")
@@ -130,16 +150,16 @@ func filePoller(ctx context.Context, files []string, feeder chan Event) error {
 	return nil
 }
 
-func filesWatcher(ctx context.Context, files []string, feeder chan Event) {
+func filesWatcher(ctx context.Context, files []string, feeder chan Event, errChan chan error) {
 	if len(files) == 0 {
 		log.Println("No files to watch")
 		return
 	}
 	if err := fileEventWatcher(ctx, files, feeder); err != nil {
-		panic(err)
+		errChan <- errors.Wrap(err, "failed to run fileEventWatcher")
 	}
 	if err := filePoller(ctx, files, feeder); err != nil {
-		panic(err)
+		errChan <- errors.Wrap(err, "failed to run filePoller")
 	}
 
 	<-ctx.Done()
